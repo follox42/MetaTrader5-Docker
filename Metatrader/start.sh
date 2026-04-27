@@ -11,6 +11,7 @@ MT5_CMD_OPTIONS="${MT5_CMD_OPTIONS:-}"
 mono_url="https://dl.winehq.org/wine/wine-mono/10.3.0/wine-mono-10.3.0-x86.msi"
 python_url="https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe"
 mt5setup_url="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
+mono_marker="/config/.wine/.mono-installed"
 
 # Function to display a graphical message
 show_message() {
@@ -48,12 +49,13 @@ if [ ! -d "/config/.wine/drive_c" ]; then
     sleep 5
 fi
 
-# Install Mono if not present
-if [ ! -e "/config/.wine/drive_c/windows/mono" ]; then
+# Install Mono if not present (use marker file — wineboot creates empty mono/ dir as placeholder)
+if [ ! -f "$mono_marker" ]; then
     show_message "[1/7] Downloading and installing Mono..."
     curl -L -o /tmp/mono.msi $mono_url
     WINEDLLOVERRIDES=mscoree=d $wine_executable msiexec /i /tmp/mono.msi /qn
     rm -f /tmp/mono.msi
+    touch "$mono_marker"
     show_message "[1/7] Mono installed."
 else
     show_message "[1/7] Mono is already installed."
