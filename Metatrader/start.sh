@@ -11,7 +11,6 @@ MT5_CMD_OPTIONS="${MT5_CMD_OPTIONS:-}"
 mono_url="https://dl.winehq.org/wine/wine-mono/10.3.0/wine-mono-10.3.0-x86.msi"
 python_url="https://www.python.org/ftp/python/3.9.13/python-3.9.13.exe"
 mt5setup_url="https://download.mql5.com/cdn/web/metaquotes.software.corp/mt5/mt5setup.exe"
-mono_marker="/config/.wine/.mono-installed"
 
 # Function to display a graphical message
 show_message() {
@@ -49,17 +48,13 @@ if [ ! -d "/config/.wine/drive_c" ]; then
     sleep 5
 fi
 
-# Install Mono if not present (use marker file — wineboot creates empty mono/ dir as placeholder)
-if [ ! -f "$mono_marker" ]; then
-    show_message "[1/7] Downloading and installing Mono..."
-    curl -L -o /tmp/mono.msi $mono_url
-    WINEDLLOVERRIDES=mscoree=d $wine_executable msiexec /i /tmp/mono.msi /qn
-    rm -f /tmp/mono.msi
-    touch "$mono_marker"
-    show_message "[1/7] Mono installed."
-else
-    show_message "[1/7] Mono is already installed."
-fi
+# ALWAYS install Mono on every boot — idempotent, ensures correctness
+# (Previous skip-if-installed was unreliable: empty placeholder dirs + stale markers)
+show_message "[1/7] Downloading and installing Mono (always — idempotent)..."
+curl -L -o /tmp/mono.msi $mono_url
+WINEDLLOVERRIDES=mscoree=d $wine_executable msiexec /i /tmp/mono.msi /qn
+rm -f /tmp/mono.msi
+show_message "[1/7] Mono installed."
 
 # Check if MetaTrader 5 is already installed
 if [ -e "$mt5file" ]; then
@@ -71,10 +66,33 @@ else
     $wine_executable reg add "HKEY_CURRENT_USER\\Software\\Wine" /v Version /t REG_SZ /d "win10" /f
     show_message "[3/7] Downloading MT5 installer..."
     curl -L -o /tmp/mt5setup.exe $mt5setup_url
-    show_message "[3/7] Installing MetaTrader 5..."
+    show_message "[3/7] Installing MetaTrader 5 (max 10min wait)..."
     $wine_executable "/tmp/mt5setup.exe" "/auto" &
-    wait
+    MT5_PID=$!
+
+    # Wait up to 10min for terminal64.exe to appear OR wine to exit naturally
+    for i in $(seq 1 60); do
+        if [ -e "$mt5file" ]; then
+            show_message "[3/7] terminal64.exe appeared after ${i}*10s"
+            sleep 30  # let install finalize files
+            break
+        fi
+        if ! ps -p $MT5_PID > /dev/null 2>&1; then
+            show_message "[3/7] wine MT5 setup process exited after ${i}*10s"
+            break
+        fi
+        if [ $((i % 6)) -eq 0 ]; then
+            elapsed=$((i * 10))
+            show_message "[3/7] still installing ${elapsed}s..."
+        fi
+        sleep 10
+    done
+    kill -9 $MT5_PID 2>/dev/null || true
     rm -f /tmp/mt5setup.exe
+
+    if [ ! -e "$mt5file" ]; then
+        show_message "[3/7] WARNING: terminal64.exe still missing after 10min — continuing anyway"
+    fi
 fi
 
 # Recheck if MetaTrader 5 is installed
