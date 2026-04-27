@@ -41,12 +41,19 @@ is_wine_python_package_installed() {
 check_dependency "curl"
 check_dependency "$wine_executable"
 
+# Pre-init Wine prefix on first boot (creates /config/.wine/ structure)
+if [ ! -d "/config/.wine/drive_c" ]; then
+    show_message "[0/7] Pre-init Wine prefix"
+    $wine_executable wineboot --init || true
+    sleep 5
+fi
+
 # Install Mono if not present
 if [ ! -e "/config/.wine/drive_c/windows/mono" ]; then
     show_message "[1/7] Downloading and installing Mono..."
-    curl -o /config/.wine/drive_c/mono.msi $mono_url
-    WINEDLLOVERRIDES=mscoree=d $wine_executable msiexec /i /config/.wine/drive_c/mono.msi /qn
-    rm /config/.wine/drive_c/mono.msi
+    curl -L -o /tmp/mono.msi $mono_url
+    WINEDLLOVERRIDES=mscoree=d $wine_executable msiexec /i /tmp/mono.msi /qn
+    rm -f /tmp/mono.msi
     show_message "[1/7] Mono installed."
 else
     show_message "[1/7] Mono is already installed."
@@ -61,11 +68,11 @@ else
     # Set Windows 10 mode in Wine and download and install MT5
     $wine_executable reg add "HKEY_CURRENT_USER\\Software\\Wine" /v Version /t REG_SZ /d "win10" /f
     show_message "[3/7] Downloading MT5 installer..."
-    curl -o /config/.wine/drive_c/mt5setup.exe $mt5setup_url
+    curl -L -o /tmp/mt5setup.exe $mt5setup_url
     show_message "[3/7] Installing MetaTrader 5..."
-    $wine_executable "/config/.wine/drive_c/mt5setup.exe" "/auto" &
+    $wine_executable "/tmp/mt5setup.exe" "/auto" &
     wait
-    rm -f /config/.wine/drive_c/mt5setup.exe
+    rm -f /tmp/mt5setup.exe
 fi
 
 # Recheck if MetaTrader 5 is installed
