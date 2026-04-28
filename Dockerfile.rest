@@ -1,0 +1,29 @@
+# MODE 2: MT5 + mt5linux RPyC :8001 + KasmVNC :3000 + FastAPI REST :8000
+#
+# Switch in Coolify UI → app → General → "Dockerfile location" : /Dockerfile.rest
+# (vs /Dockerfile pour mode 1 RPyC seulement)
+#
+# Le FastAPI REST tourne dans le MEME container, parle a localhost:8001 (RPyC).
+# Expose des endpoints HTTP REST (JSON) accessibles via Cloudflare HTTP proxy.
+
+FROM gmag11/metatrader5_vnc:latest
+
+# Apply our 8 patches via the patched Metatrader/start.sh from this repo
+# (the upstream image's start.sh has bugs: -w switch removed in mt5linux 1.0+,
+# Mono path chicken-and-egg on fresh volume, no KEEPALIVE, etc.)
+COPY Metatrader/start.sh /Metatrader/start.sh
+RUN chmod +x /Metatrader/start.sh
+
+# Install FastAPI REST stack on Linux side (alongside Wine python + MT5)
+RUN pip install --break-system-packages --no-cache-dir \
+        fastapi==0.115.0 \
+        "uvicorn[standard]==0.32.0" \
+        pydantic==2.9.0
+
+COPY rest_api.py /app/rest_api.py
+
+# Inject FastAPI launch right before KEEPALIVE wait at end of start.sh.
+# Both servers run; KEEPALIVE blocks on mt5linux PID (if RPyC dies, restart).
+RUN sed -i 's|^# Keep script alive|echo "[REST] starting FastAPI on :8000"\nuvicorn --app-dir /app rest_api:app --host 0.0.0.0 --port 8000 \&\nUVICORN_PID=$!\nsleep 3\necho "[REST] FastAPI PID $UVICORN_PID"\n# Keep script alive|' /Metatrader/start.sh
+
+EXPOSE 3000 8000 8001
