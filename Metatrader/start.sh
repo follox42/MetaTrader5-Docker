@@ -108,17 +108,24 @@ show_message "[6/7] Installing MetaTrader5 library in Windows"
 if ! is_wine_python_package_installed "MetaTrader5==$metatrader_version"; then
     $wine_executable python -m pip install --no-cache-dir MetaTrader5==$metatrader_version
 fi
-show_message "[6/7] Installing mt5linux==0.1.9 (force) in Windows"
-$wine_executable python -m pip install --no-cache-dir --force-reinstall "mt5linux==0.1.9"
+# Wine side: mt5linux 0.1.9 + rpyc 5.0.1 (must match Linux side for binary protocol compat)
+show_message "[6/7] Installing mt5linux==0.1.9 + rpyc==5.0.1 (force) in Windows"
+$wine_executable python -m pip install --no-cache-dir --force-reinstall "mt5linux==0.1.9" "rpyc==5.0.1"
 
 if ! is_wine_python_package_installed "python-dateutil"; then
     show_message "[6/7] Installing python-dateutil library in Windows"
     $wine_executable python -m pip install --no-cache-dir python-dateutil
 fi
 
-show_message "[6/7] Installing mt5linux==0.1.9 (force) in Linux"
-pip install --break-system-packages --no-cache-dir --no-deps --force-reinstall "mt5linux==0.1.9"
-pip install --break-system-packages --no-cache-dir rpyc plumbum numpy
+# Linux side: same versions as Wine — rpyc protocol must match between client and server.
+# CRITICAL: gmag11 upstream had `pip install rpyc plumbum numpy` (no pin) → latest 6.x.
+# Wine python had pinned rpyc 5.0.1 → mismatch → "ValueError: invalid message type: 18".
+show_message "[6/7] Installing mt5linux==0.1.9 + rpyc==5.0.1 + plumbum==1.7.0 (force) in Linux"
+pip install --break-system-packages --no-cache-dir --no-deps --force-reinstall \
+    "mt5linux==0.1.9" \
+    "rpyc==5.0.1" \
+    "plumbum==1.7.0"
+pip install --break-system-packages --no-cache-dir numpy
 
 show_message "[6/7] Checking and installing pyxdg library in Linux if necessary"
 if ! is_python_package_installed "pyxdg"; then
