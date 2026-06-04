@@ -85,6 +85,29 @@ else
     fi
 fi
 
+# [3.5/7] Patch MT5 history limit BEFORE terminal launches.
+# Default common.ini ships with `[Charts] MaxBars=100000` which limits M1 history
+# to ~70 days. Bumping to 10M lets copy_rates_range return M1 history > 6 years.
+# The file is UTF-16-LE encoded (Windows-native) and lives in the MT5 install dir.
+# On first boot the file may not exist yet — we patch it (or wait for next boot)
+# so the change becomes effective without rebuilding the Wine prefix.
+common_ini="/config/.wine/drive_c/Program Files/MetaTrader 5/config/common.ini"
+if [ -f "$common_ini" ]; then
+    # iconv: UTF-16-LE → UTF-8 → sed → UTF-8 → UTF-16-LE, BOM preserved by hand
+    tmp_u8=$(mktemp)
+    iconv -f UTF-16LE -t UTF-8 "$common_ini" > "$tmp_u8" 2>/dev/null || cp "$common_ini" "$tmp_u8"
+    if grep -q "^MaxBars=" "$tmp_u8"; then
+        sed -i 's/^MaxBars=[0-9]*/MaxBars=10000000/' "$tmp_u8"
+        # Re-encode back to UTF-16-LE with BOM
+        printf '\xff\xfe' > "$common_ini"
+        iconv -f UTF-8 -t UTF-16LE "$tmp_u8" >> "$common_ini"
+        show_message "[3.5/7] Patched common.ini: MaxBars → 10000000 (enables M1 > 70d)"
+    fi
+    rm -f "$tmp_u8"
+else
+    show_message "[3.5/7] common.ini not yet created (will be patched on next boot)"
+fi
+
 if [ -e "$mt5file" ]; then
     show_message "[4/7] File $mt5file is installed. Running MT5..."
     $wine_executable "$mt5file" $MT5_CMD_OPTIONS &
