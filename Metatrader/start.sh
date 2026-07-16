@@ -36,11 +36,29 @@ is_wine_python_package_installed() {
 check_dependency "curl"
 check_dependency "$wine_executable"
 
-# Pre-init Wine prefix on first boot
-if [ ! -d "/config/.wine/drive_c" ]; then
-    show_message "[0/7] Pre-init Wine prefix"
-    $wine_executable wineboot --init || true
-    sleep 5
+# Pre-init Wine prefix on first boot.
+# FIX (2026-07): the old check tested `drive_c` existence + `|| true` + `sleep 5`.
+# A half-created prefix (drive_c present but system32 empty) passed the check and
+# skipped wineboot forever -> `kernel32.dll status c0000135` on every wine call ->
+# MT5 install fails silently. All working containers dodged this by inheriting an
+# already-built prefix via volume clone; a genuinely fresh build hit the dead path.
+# Now: gate on kernel32.dll (the real "prefix ready" marker), nuke any half-baked
+# prefix, run wineboot and WAIT for it (wineserver -w, not sleep), verify, fail loud.
+kernel32="/config/.wine/drive_c/windows/system32/kernel32.dll"
+if [ ! -f "$kernel32" ]; then
+    show_message "[0/7] Wine prefix not ready — (re)initializing"
+    rm -rf /config/.wine
+    WINEARCH=win64 WINEDLLOVERRIDES=mscoree=d $wine_executable wineboot --init
+    $wine_executable wineserver -w    # block until wineboot fully finishes
+    for i in $(seq 1 30); do
+        [ -f "$kernel32" ] && break
+        sleep 2
+    done
+    if [ ! -f "$kernel32" ]; then
+        show_message "[0/7] FATAL: Wine prefix init failed (kernel32 missing after wineboot). Aborting so supervisord retries instead of installing MT5 onto a dead prefix."
+        exit 1
+    fi
+    show_message "[0/7] Wine prefix ready (kernel32 present)."
 fi
 
 # ALWAYS install Mono on every boot — idempotent
