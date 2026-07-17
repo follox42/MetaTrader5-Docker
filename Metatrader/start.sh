@@ -185,6 +185,39 @@ else
     show_message "[7/7] Failed to start the mt5linux server on port $mt5server_port."
 fi
 
+# [7.5/7] Login self-heal (2026-07). The command-line /login handed to
+# terminal64.exe does a SILENT login; if it fails (server not yet in the
+# terminal's list, fresh prefix, transient), MT5 pops a modal Login dialog
+# that blocks the Python IPC → every mt5.initialize() hangs (-10005). We
+# force the login through the API (which dismisses the modal and authorizes),
+# and retry a few times. No-op when MT5_CMD_OPTIONS carries no /login.
+if echo "$MT5_CMD_OPTIONS" | grep -q "/login:"; then
+    LOGIN=$(echo "$MT5_CMD_OPTIONS"  | grep -oP '/login:\K[^ ]+')
+    PASSWD=$(echo "$MT5_CMD_OPTIONS" | grep -oP '/password:\K[^ ]+')
+    SERVER=$(echo "$MT5_CMD_OPTIONS" | grep -oP '/server:\K[^ ]+')
+    for attempt in 1 2 3 4 5; do
+        AUTH=$($wine_executable python -c "
+import MetaTrader5 as mt5
+ok = mt5.initialize(login=int('$LOGIN'), password='$PASSWD', server='$SERVER', timeout=90000, portable=True)
+ai = mt5.account_info()
+print('AUTHOK' if (ok and ai and ai.login==int('$LOGIN')) else 'AUTHFAIL', mt5.last_error())
+" 2>/dev/null | tail -1)
+        if echo "$AUTH" | grep -q "AUTHOK"; then
+            show_message "[7.5/7] Login verified for $LOGIN@$SERVER (attempt $attempt)."
+            break
+        fi
+        show_message "[7.5/7] Login not confirmed (attempt $attempt): $AUTH — killing terminal + relaunching with creds."
+        taskkill_out=$($wine_executable taskkill /F /IM terminal64.exe 2>/dev/null) || true
+        pkill -f terminal64.exe 2>/dev/null || true
+        sleep 3
+        $wine_executable "$mt5file" $MT5_CMD_OPTIONS &
+        sleep 25
+    done
+    if ! echo "$AUTH" | grep -q "AUTHOK"; then
+        show_message "[7.5/7] WARNING: login still unconfirmed after 5 tries — check creds/server. Container stays up for manual VNC login."
+    fi
+fi
+
 # Keep script alive — linuxserver supervisord will restart it if it exits.
 # Block on mt5linux server PID. If mt5linux dies, script exits and gets restarted.
 show_message "[KEEPALIVE] script will block on mt5linux server PID $MT5LINUX_PID"
